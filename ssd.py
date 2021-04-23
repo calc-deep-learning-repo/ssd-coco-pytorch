@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.models.resnet import resnet18, resnet34, resnet50, resnet101, resnet152
+from config import CLASS_NUM
 
 
 class ResNet(nn.Module):
@@ -39,7 +40,6 @@ class ResNet(nn.Module):
         if backbone_path:
             backbone.load_state_dict(torch.load(backbone_path))
 
-
         self.feature_extractor = nn.Sequential(*list(backbone.children())[:7])
 
         conv4_block1 = self.feature_extractor[-1][0]
@@ -59,7 +59,7 @@ class SSD300(nn.Module):
 
         self.feature_extractor = backbone
 
-        self.label_num = 81  # number of COCO classes
+        self.label_num = CLASS_NUM
         self._build_additional_features(self.feature_extractor.out_channels)
         self.num_defaults = [4, 6, 6, 6, 4, 4]
         self.loc = []

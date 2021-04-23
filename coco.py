@@ -1,14 +1,11 @@
 import os
+import os.path as osp
 import sys
-import numpy as np
 import torch
 import torch.utils.data as data
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
 import cv2
-from PIL import Image
-from pycocotools.coco import COCO
-
+import numpy as np
 
 coco_cfg = {
     'num_classes': 81,
@@ -25,88 +22,207 @@ coco_cfg = {
     'name': 'COCO',
 }
 
+COCO_ROOT = './data/coco/'
+IMAGES = 'images'
+ANNOTATIONS = 'annotations'
+COCO_API = 'PythonAPI'
+INSTANCES_SET = 'instances_{}.json'
+COCO_CLASSES = ('person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
+                'train', 'truck', 'boat', 'traffic light', 'fire', 'hydrant',
+                'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog',
+                'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
+                'giraffe', 'backpack', 'umbrella', 'handbag', 'tie',
+                'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
+                'kite', 'baseball bat', 'baseball glove', 'skateboard',
+                'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
+                'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+                'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza',
+                'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed',
+                'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
+                'keyboard', 'cell phone', 'microwave oven', 'toaster', 'sink',
+                'refrigerator', 'book', 'clock', 'vase', 'scissors',
+                'teddy bear', 'hair drier', 'toothbrush')
 
-COCO_CLASSES = ('person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush')
-COCO_LABEL_MAP = { 1:  1,  2:  2,  3:  3,  4:  4,  5:  5,  6:  6,  7:  7,  8:  8, 9:  9, 10: 10, 11: 11, 13: 12, 14: 13, 15: 14, 16: 15, 17: 16, 18: 17, 19: 18, 20: 19, 21: 20, 22: 21, 23: 22, 24: 23, 25: 24, 27: 25, 28: 26, 31: 27, 32: 28, 33: 29, 34: 30, 35: 31, 36: 32, 37: 33, 38: 34, 39: 35, 40: 36, 41: 37, 42: 38, 43: 39, 44: 40, 46: 41, 47: 42, 48: 43, 49: 44, 50: 45, 51: 46, 52: 47, 53: 48, 54: 49, 55: 50, 56: 51, 57: 52, 58: 53, 59: 54, 60: 55, 61: 56, 62: 57, 63: 58, 64: 59, 65: 60, 67: 61, 70: 62, 72: 63, 73: 64, 74: 65, 75: 66, 76: 67, 77: 68, 78: 69, 79: 70, 80: 71, 81: 72, 82: 73, 84: 74, 85: 75, 86: 76, 87: 77, 88: 78, 89: 79, 90: 80}
+
+def get_label_map(label_file):
+    label_map = {}
+    labels = open(label_file, 'r')
+    for line in labels:
+        ids = line.split(',')
+        label_map[int(ids[0])] = int(ids[1])
+    return label_map
 
 
 class COCOAnnotationTransform(object):
+    """Transforms a COCO annotation into a Tensor of bbox coords and label index
+    Initilized with a dictionary lookup of classnames to indexes
+    """
     def __init__(self):
-        self.label_map = COCO_LABEL_MAP
+        self.label_map = get_label_map(osp.join(COCO_ROOT, 'coco_labels.txt'))
 
     def __call__(self, target, width, height):
+        """
+        Args:
+            target (dict): COCO target json annotation as a python dict
+            height (int): height
+            width (int): width
+        Returns:
+            a list containing lists of bounding boxes  [bbox coords, class idx]
+        """
         scale = np.array([width, height, width, height])
         res = []
         for obj in target:
             if 'bbox' in obj:
                 bbox = obj['bbox']
+                bbox[2] += bbox[0]
+                bbox[3] += bbox[1]
                 label_idx = self.label_map[obj['category_id']] - 1
-                final_box = list(np.array([bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3]])/scale)
+                final_box = list(np.array(bbox)/scale)
                 final_box.append(label_idx)
                 res += [final_box]  # [xmin, ymin, xmax, ymax, label_idx]
             else:
-                print("No bbox found for object ", obj)
+                print("no bbox problem!")
 
         return res  # [[xmin, ymin, xmax, ymax, label_idx], ... ]
 
 
-class COCODetection(data.Dataset):
-    def __init__(self, image_path, info_file, transform=None,
-                 target_transform=None, has_gt=True):
-        self.root = image_path
-        self.coco = COCO(info_file)
-        self.ids = list(self.coco.imgToAnns.keys())  # 标签数目 小于样本数目，说明有的图像没有标签
+class COCODetection2(data.Dataset):
+    """`MS Coco Detection <http://mscoco.org/dataset/#detections-challenge2016>`_ Dataset.
+    Args:
+        root (string): Root directory where images are downloaded to.
+        set_name (string): Name of the specific set of COCO images.
+        transform (callable, optional): A function/transform that augments the
+                                        raw images`
+        target_transform (callable, optional): A function/transform that takes
+        in the target (bbox) and transforms it.
+    """
 
-        if len(self.ids) == 0 or not has_gt:  # 如果没有标签或者不需要GT，则直接使用image
-            self.ids = list(self.coco.imgs.keys())
+    def __init__(self, root, image_set='train2017', transform=None,
+                 target_transform=COCOAnnotationTransform(), dataset_name='MS COCO'):
+        sys.path.append(osp.join(root, COCO_API))
+        from pycocotools.coco import COCO
+        self.root = osp.join(root, IMAGES, image_set)
+        self.coco = COCO(osp.join(root, ANNOTATIONS,
+                                  INSTANCES_SET.format(image_set)))
+        self.ids = list(self.coco.imgToAnns.keys())
         self.transform = transform
         self.target_transform = target_transform
+        self.name = dataset_name
 
-        self.has_gt = has_gt
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: Tuple (image, target).
+                   target is the object returned by ``coco.loadAnns``.
+        """
+        im, gt, h, w, masks = self.pull_item(index)
+        return im, gt, masks
 
     def __len__(self):
         return len(self.ids)
 
-    def __getitem__(self, index):
-        im, gt, masks, h, w, num_crowds = self.pull_item(index)
-        return im, (gt, masks, num_crowds)
-
     def pull_item(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            tuple: Tuple (image, target, height, width).
+                   target is the object returned by ``coco.loadAnns``.
+        """
         img_id = self.ids[index]
-        if self.has_gt:
-            ann_ids = self.coco.getAnnIds(imgIds=img_id)
-            target = self.coco.loadAnns(ann_ids)
-        else:
-            target = []
-        crowd = [x for x in target if ('iscrowd' in x and x['iscrowd'])]
-        target = [x for x in target if not ('iscrowd' in x and x['iscrowd'])]
-        num_crowds = len(crowd)
+        target = self.coco.imgToAnns[img_id]
+        ann_ids = self.coco.getAnnIds(imgIds=img_id)
 
-        # This is so we ensure that all crowd annotations are at the end of the array
-        target += crowd
-        file_name = self.coco.loadImgs(img_id)[0]['file_name']
-        path = os.path.join(self.root, file_name)
-        img = Image.open(path)
-        width, height = img.size
-        if len(target) > 0:
-            masks = [self.coco.annToMask(obj).reshape(-1) for obj in target]
-            masks = np.vstack(masks)
-            masks = masks.reshape(-1, height, width)
-        if self.transform:
-            img =self.transform(img)
-        if self.target_transform and len(target) > 0:
+        target = self.coco.loadAnns(ann_ids)
+        path = osp.join(self.root, self.coco.loadImgs(img_id)[0]['file_name'])
+        assert osp.exists(path), 'Image path does not exist: {}'.format(path)
+        img = cv2.imread(path)
+        height, width, _ = img.shape
+        masks = [self.coco.annToMask(obj).reshape(-1) for obj in target]
+        masks = np.vstack(masks)
+        masks = masks.reshape(-1, height, width)
+        if self.target_transform is not None:
             target = self.target_transform(target, width, height)
-        return img, target, masks, height, width, num_crowds
+        if self.transform is not None:
+            target = np.array(target)
+            img, boxes, labels = self.transform(img, target[:, :4],
+                                                target[:, 4])
+            # to rgb
+            img = img[:, :, (2, 1, 0)]
+
+            target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
+        return torch.from_numpy(img).permute(2, 0, 1), target, height, width, masks
+
+    def pull_image(self, index):
+        '''Returns the original image object at index in PIL form
+
+        Note: not using self.__getitem__(), as any transformations passed in
+        could mess up this functionality.
+
+        Argument:
+            index (int): index of img to show
+        Return:
+            cv2 img
+        '''
+        img_id = self.ids[index]
+        path = self.coco.loadImgs(img_id)[0]['file_name']
+        return cv2.imread(osp.join(self.root, path), cv2.IMREAD_COLOR)
+
+    def pull_anno(self, index):
+        '''Returns the original annotation of image at index
+
+        Note: not using self.__getitem__(), as any transformations passed in
+        could mess up this functionality.
+
+        Argument:
+            index (int): index of img to get annotation of
+        Return:
+            list:  [img_id, [(label, bbox coords),...]]
+                eg: ('001718', [('dog', (96, 13, 438, 332))])
+        '''
+        img_id = self.ids[index]
+        ann_ids = self.coco.getAnnIds(imgIds=img_id)
+        return self.coco.loadAnns(ann_ids)
+
+    def __repr__(self):
+        fmt_str = 'Dataset ' + self.__class__.__name__ + '\n'
+        fmt_str += '    Number of datapoints: {}\n'.format(self.__len__())
+        fmt_str += '    Root Location: {}\n'.format(self.root)
+        tmp = '    Transforms (if any): '
+        fmt_str += '{0}{1}\n'.format(tmp, self.transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
+        tmp = '    Target Transforms (if any): '
+        fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
+        return fmt_str
+
+
+def detection_collate(batch):
+    """Custom collate fn for dealing with batches of images that have a different
+    number of associated object annotations (bounding boxes).
+
+    Arguments:
+        batch: (tuple) A tuple of tensor images and lists of annotations
+
+    Return:
+        A tuple containing:
+            1) (tensor) batch of images stacked on their 0 dim
+            2) (list of tensors) annotations for a given image are stacked on
+                                 0 dim
+    """
+    targets = []
+    imgs = []
+    for sample in batch:
+        imgs.append(sample[0])
+        targets.append(torch.FloatTensor(sample[1]))
+    return torch.stack(imgs, 0), targets
 
 
 if __name__=='__main__':
-    val_info = r'../data/coco/annotations/instances_val2017.json'
-    val_image = r'../data/coco/images/val2017'
-    dataset = COCODetection(val_image, val_info)
-    loader = DataLoader(dataset)
-    for img, label in loader:
-        img = np.uint8(img.squeeze().numpy().transpose(1, 2, 0))
-        gt, masks, num_crowds = label
+    dataset = COCODetection2(root="./data/coco/")
+    loader = torch.utils.data.DataLoader(dataset)
+    for img, gt, masks in loader:
+        img = np.uint8(img.squeeze().permute(1,2,0).numpy())
         masks = masks.squeeze(0)
         for m in range(masks.size(0)):
             mask = masks[m].numpy()
@@ -116,4 +232,3 @@ if __name__=='__main__':
             img[y, x, channel] = color
         cv2.imshow('img', img)
         cv2.waitKey(500)
-
